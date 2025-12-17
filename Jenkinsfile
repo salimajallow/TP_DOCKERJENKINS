@@ -55,7 +55,8 @@ pipeline {
             steps {
                 script {
                     sh 'sleep 10'  // Attends que le container démarre
-                    sh 'curl -f http://localhost:8080 || exit 1'
+                   echo 'Test de l’application'
+                    sh 'python sum.py'
                 }
             }
         }
