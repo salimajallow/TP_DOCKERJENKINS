@@ -2,90 +2,87 @@ pipeline {
     agent any
     
     environment {
-        PATH = "/usr/local/bin:/Applications/Docker.app/Contents/Resources/bin:${env.PATH}"
+        CONTAINER_ID = ''
+        SUM_PY_PATH = "${WORKSPACE}/sum.py"
+        DIR_PATH = "${WORKSPACE}"
+        TEST_FILE_PATH = "${WORKSPACE}/test_variables.txt"
     }
-
+    
     stages {
-        stage('Checkout') {
-            steps {
-                checkout scm
-                echo 'Code récupéré avec succès'
-            }
-        }
-        
+        // Les étapes suivront
         stage('Build') {
-            steps {
-                script {
-                    // REMPLACE "bat" PAR "sh" POUR MAC/LINUX
-                    if (isUnix()) {
-                        // Commande pour Mac/Linux
-                        sh '''
-                            echo "Building Docker image..."
-                            docker build -t mon-app .
-                        '''
+          steps {
+        script {
+            docker.build("python-sum-app:${BUILD_ID}")
+        }
+          }
+}
+ stage('Run') {
+    steps {
+        script {
+            def container = docker.run(
+                image: "python-sum-app:${BUILD_ID}",
+                args: "-d --name python-sum-container-${BUILD_ID}"
+            )
+            CONTAINER_ID = container.id
+            echo "Conteneur démarré avec ID : ${CONTAINER_ID}"
+        }
+    }
+}
+stage('Test') {
+    steps {
+        script {
+            def testLines = readFile(TEST_FILE_PATH).split('\n')
+            
+            for (line in testLines) {
+                if (line.trim()) {
+                    def vars = line.split(' ')
+                    def arg1 = vars[0]
+                    def arg2 = vars[1]
+                    def expectedSum = vars[2].toFloat()
+                    
+                    def output = sh(
+                        script: "docker exec ${CONTAINER_ID} python /app/sum.py ${arg1} ${arg2}",
+                        returnStdout: true
+                    ).trim()
+                    
+                    def result = output.toFloat()
+                    
+                    if (result == expectedSum) {
+                        echo "✅ Test réussi : ${arg1} + ${arg2} = ${result}"
                     } else {
-                        // Commande pour Windows (gardée pour compatibilité)
-                        bat '''
-                            echo "Building Docker image..."
-                            docker build -t mon-app .
-                        '''
+                        error "❌ Test échoué : ${arg1} + ${arg2}. Attendu: ${expectedSum}, Obtenu: ${result}"
                     }
                 }
             }
         }
-        
-        stage('Run') {
-            steps {
-                script {
-                    // AJOUTE CETTE LIGNE POUR CRÉER LA VARIABLE
-                    def CONTAINER_ID = sh(
-                        script: 'docker run -d -p 8080:80 mon-app',
-                        returnStdout: true
-                    ).trim()
-                    
-                    echo "Container ID: ${CONTAINER_ID}"
-                    
-                    // SAUVEGARDE LA VARIABLE POUR L'UTILISER PLUS TARD
-                    env.CONTAINER_ID = CONTAINER_ID
-                }
-            }
-        }
-        
-        stage('Test') {
-            steps {
-                script {
-                    sh 'sleep 10'  // Attends que le container démarre
-                   echo 'Test de l’application'
-                    sh 'python sum.py'
-                }
-            }
-        }
-        
-        stage('Deploy') {
-            steps {
-                echo 'Deploying application...'
-                // ICI tu peux utiliser env.CONTAINER_ID
-                echo "Container déployé: ${env.CONTAINER_ID}"
+    }
+}
+post {
+    always {
+        script {
+            if (CONTAINER_ID) {
+                sh "docker stop ${CONTAINER_ID} || true"
+                sh "docker rm ${CONTAINER_ID} || true"
+                echo "Conteneur nettoyé"
             }
         }
     }
-    
-    post {
-        always {
-            echo 'Cleanup...'
-            script {
-                // UTILISE env.CONTAINER_ID qui a été sauvegardé
-                if (env.CONTAINER_ID) {
-                    sh "docker stop ${env.CONTAINER_ID} || true"
-                    sh "docker rm ${env.CONTAINER_ID} || true"
-                }
+}
+stage('Deploy to DockerHub') {
+    steps {
+        script {
+            withCredentials([usernamePassword(
+                credentialsId: 'docker-hub-credentials',
+                usernameVariable: 'DOCKER_USER',
+                passwordVariable: 'DOCKER_PASS'
+            )]) {
+                sh "docker login -u ${DOCKER_USER} -p ${DOCKER_PASS}"
+                sh "docker tag python-sum-app:${BUILD_ID} ${DOCKER_USER}/python-sum-app:latest"
+                sh "docker push ${DOCKER_USER}/python-sum-app:latest"
             }
         }
-        success {
-            echo 'Pipeline réussi ! 🎉'
-        }
-        failure {
-            echo 'Pipeline échoué 😢'
-        }
+    }
+}
     }
 }
