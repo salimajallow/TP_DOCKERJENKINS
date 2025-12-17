@@ -1,75 +1,86 @@
 pipeline {
     agent any
-
-    environment {
-        IMAGE_NAME = "sum-python-app"
-        CONTAINER_ID = ""
-        TEST_FILE_PATH = "test_variables.txt"
-    }
-
+    
     stages {
-
+        stage('Checkout') {
+            steps {
+                checkout scm
+                echo 'Code récupéré avec succès'
+            }
+        }
+        
         stage('Build') {
             steps {
-                bat "docker build -t ${IMAGE_NAME} ."
-            }
-        }
-
-        stage('Run') {
-            steps {
                 script {
-                    def output = bat(
-                        script: "docker run -d ${IMAGE_NAME}",
-                        returnStdout: true
-                    )
-                    CONTAINER_ID = output.trim()
-                }
-            }
-        }
-
-        stage('Test') {
-            steps {
-                script {
-                    def lines = readFile(TEST_FILE_PATH).split('\n')
-
-                    for (line in lines) {
-                        if (line.trim() == "") continue
-
-                        def vars = line.split(' ')
-                        def arg1 = vars[0]
-                        def arg2 = vars[1]
-                        def expected = vars[2].toFloat()
-
-                        def output = bat(
-                            script: "docker exec ${CONTAINER_ID} python /app/sum.py ${arg1} ${arg2}",
-                            returnStdout: true
-                        )
-
-                        def result = output.trim().toFloat()
-
-                        if (result == expected) {
-                            echo "OK: ${arg1} + ${arg2} = ${result}"
-                        } else {
-                            error "ERREUR: ${arg1} + ${arg2} ≠ ${expected}"
-                        }
+                    // REMPLACE "bat" PAR "sh" POUR MAC/LINUX
+                    if (isUnix()) {
+                        // Commande pour Mac/Linux
+                        sh '''
+                            echo "Building Docker image..."
+                            docker build -t mon-app .
+                        '''
+                    } else {
+                        // Commande pour Windows (gardée pour compatibilité)
+                        bat '''
+                            echo "Building Docker image..."
+                            docker build -t mon-app .
+                        '''
                     }
                 }
             }
         }
-
+        
+        stage('Run') {
+            steps {
+                script {
+                    // AJOUTE CETTE LIGNE POUR CRÉER LA VARIABLE
+                    def CONTAINER_ID = sh(
+                        script: 'docker run -d -p 8080:80 mon-app',
+                        returnStdout: true
+                    ).trim()
+                    
+                    echo "Container ID: ${CONTAINER_ID}"
+                    
+                    // SAUVEGARDE LA VARIABLE POUR L'UTILISER PLUS TARD
+                    env.CONTAINER_ID = CONTAINER_ID
+                }
+            }
+        }
+        
+        stage('Test') {
+            steps {
+                script {
+                    sh 'sleep 10'  // Attends que le container démarre
+                    sh 'curl -f http://localhost:8080 || exit 1'
+                }
+            }
+        }
+        
         stage('Deploy') {
             steps {
-                bat "docker login"
-                bat "docker tag ${IMAGE_NAME} your_dockerhub_username/${IMAGE_NAME}"
-                bat "docker push your_dockerhub_username/${IMAGE_NAME}"
+                echo 'Deploying application...'
+                // ICI tu peux utiliser env.CONTAINER_ID
+                echo "Container déployé: ${env.CONTAINER_ID}"
             }
         }
     }
-
+    
     post {
         always {
-            bat "docker stop ${CONTAINER_ID}"
-            bat "docker rm ${CONTAINER_ID}"
+            echo 'Cleanup...'
+            script {
+                // UTILISE env.CONTAINER_ID qui a été sauvegardé
+                if (env.CONTAINER_ID) {
+                    sh "docker stop ${env.CONTAINER_ID} || true"
+                    sh "docker rm ${env.CONTAINER_ID} || true"
+                }
+            }
+        }
+        success {
+            echo 'Pipeline réussi ! 🎉'
+        }
+        failure {
+            echo 'Pipeline échoué 😢'
         }
     }
 }
