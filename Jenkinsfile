@@ -1,6 +1,10 @@
 pipeline {
     agent any
     
+    environment {
+        PATH = "/usr/local/bin:/Applications/Docker.app/Contents/Resources/bin:${env.PATH}"
+    }
+
     stages {
         stage('Checkout') {
             steps {
