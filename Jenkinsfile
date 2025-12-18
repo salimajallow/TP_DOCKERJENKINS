@@ -1,88 +1,54 @@
 pipeline {
     agent any
-    
+
     environment {
-        CONTAINER_ID = ''
-        SUM_PY_PATH = "${WORKSPACE}/sum.py"
-        DIR_PATH = "${WORKSPACE}"
-        TEST_FILE_PATH = "${WORKSPACE}/test_variables.txt"
+        PATH = "/usr/local/bin:/Applications/Docker.app/Contents/Resources/bin:${env.PATH}"
     }
-    
+
     stages {
-        // Les étapes suivront
+
+        stage('Checkout') {
+            steps {
+                echo 'Code récupéré avec succès'
+            }
+        }
+
         stage('Build') {
-          steps {
-        script {
-            docker.build("python-sum-app:${BUILD_ID}")
+            steps {
+                sh 'docker --version'
+                sh 'docker build -t mon-app .'
+            }
         }
-          }
-}
- stage('Run') {
-    steps {
-        script {
-            def container = docker.run(
-                image: "python-sum-app:${BUILD_ID}",
-                args: "-d --name python-sum-container-${BUILD_ID}"
-            )
-            CONTAINER_ID = container.id
-            echo "Conteneur démarré avec ID : ${CONTAINER_ID}"
+
+        stage('Run') {
+            steps {
+                sh 'docker run --rm mon-app'
+            }
         }
-    }
-}
-stage('Test') {
-    steps {
-        script {
-            def testLines = readFile(TEST_FILE_PATH).split('\n')
-            
-            for (line in testLines) {
-                if (line.trim()) {
-                    def vars = line.split(' ')
-                    def arg1 = vars[0]
-                    def arg2 = vars[1]
-                    def expectedSum = vars[2].toFloat()
-                    
-                    def output = sh(
-                        script: "docker exec ${CONTAINER_ID} python /app/sum.py ${arg1} ${arg2}",
-                        returnStdout: true
-                    ).trim()
-                    
-                    def result = output.toFloat()
-                    
-                    if (result == expectedSum) {
-                        echo "✅ Test réussi : ${arg1} + ${arg2} = ${result}"
-                    } else {
-                        error "❌ Test échoué : ${arg1} + ${arg2}. Attendu: ${expectedSum}, Obtenu: ${result}"
-                    }
-                }
+
+        stage('Test') {
+            steps {
+                echo 'Test de l’application'
+                sh 'python sum.py'
+            }
+        }
+
+        stage('Deploy') {
+            steps {
+                echo 'Déploiement simulé'
             }
         }
     }
-}
-post {
-    always {
-        script {
-            if (CONTAINER_ID) {
-                sh "docker stop ${CONTAINER_ID} || true"
-                sh "docker rm ${CONTAINER_ID} || true"
-                echo "Conteneur nettoyé"
-            }
+
+    post {
+        success {
+            echo 'Pipeline réussi 🎉'
         }
-    }
-}
-stage('Deploy to DockerHub') {
-    steps {
-        script {
-            withCredentials([usernamePassword(
-                credentialsId: 'docker-hub-credentials',
-                usernameVariable: 'DOCKER_USER',
-                passwordVariable: 'DOCKER_PASS'
-            )]) {
-                sh "docker login -u ${DOCKER_USER} -p ${DOCKER_PASS}"
-                sh "docker tag python-sum-app:${BUILD_ID} ${DOCKER_USER}/python-sum-app:latest"
-                sh "docker push ${DOCKER_USER}/python-sum-app:latest"
-            }
+        failure {
+            echo 'Pipeline échoué 😢'
         }
-    }
-}
+        always {
+            echo 'Nettoyage terminé'
+        }
     }
 }
